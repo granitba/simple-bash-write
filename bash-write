@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+#
+# Author: granittiti@gmail.com
+#
+
+
+# these switches turn some bugs into errors
+set -o errexit -o pipefail -o noclobber -o nounset
+
+! getopt --test > /dev/null
+if [[ ${PIPESTATUS[0]} -ne 4 ]]; then
+	echo "Sorry, $(getopt --test) failed in this enviroment."
+	exit 1
+fi
+
+OPTIONS=dfo:h
+LONGOPTS=debug,force,output:,help
+
+! PARSED=$(getopt --options=$OPTIONS --longoptions=$LONGOPTS --name "$0" -- "$@")
+if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+	# if return value is 1, getopt has wrong arguments
+	exit 2
+fi
+# read getopt output
+eval set -- "$PARSED"
+
+debug=0 force=0 verbose=0 helpmsg=0 outFile=-
+helpmsg=$'Usage (without the <>):\n
+bash-write <options> <path to input file> --output <path to output file>\n\nOptions:
+--help|-h     Shows usage and a list of options
+--output|-o   Required. Accepts a filename as argument, writes the data onto that file
+--debug|-d    Prints every line before executing it, useful for when something unexpected happens
+--force|-f    If output file already exists, overwrite it, THIS WILL DELETE ALL DATA ON THE OUTPUT FILE!'
+
+#shift moves arguments one position left
+while true; do
+	case "$1" in
+		-d|--debug)
+			debug=1
+			shift
+			;;
+		-f|--force)
+			force=1
+			shift
+			;;
+		-o|--output)
+			outFile=$2
+			shift 2
+			;;
+		-h|--help)
+			echo "${helpmsg}"
+			exit 4
+			;;
+		--)
+			shift
+			break
+			;;
+		*)
+			echo "Unknown option"
+			exit 3
+			;;
+	esac
+done
+
+
+# if debug is set, prints every expression before executing
+if [[ "${debug}" -eq 1 ]]; then
+	set -o xtrace
+fi
+
+# handle non-option arguments
+if [[ $# -eq 1 ]]; then
+	inFile=$1
+fi
+
+echo "force: ${force}, debug: ${debug}, out: ${outFile}"
+
+
+# check if data was piped or if input file was set
+_check_input() {
+	if [[ -p /dev/stdin && -n "${inFile:-}" ]]; then
+		echo "Data was piped into script, it will be ignored, input file $inFile will be used instead."
+		read -r pipe
+		usePipe=0
+	elif [[ -p /dev/stdin ]]; then
+		echo "Piped data will be used as input."
+		read -r pipe
+		usePipe=1
+	elif [[ -n "${inFile:-}" ]]; then
+		echo "$inFile will be used as input."
+	else 
+		echo "A single input file or piped data is required."
+		exit 4
+	fi
+	if [[ $outFile == - ]]; then
+		echo "Output file is REQUIRED, please specify using --output or -o!"
+		exit 4
+	fi
+}
+
+_get_input() {
+	data=""
+	if [[ -n "${pipe:-}" && ${usePipe} -eq 1 ]]; then
+		data="${pipe}"
+	elif [[ -n "${inFile:-}" ]]; then
+		data=$(<"${inFile}")
+	else
+		echo "If this error shows up, then I might as well just start the script over"
+		exit 4
+	fi
+}
+_write_input() {
+	local forcePrint="$1"
+	local text="$2"
+	if [[ forcePrint -eq 1 ]]; then 
+		echo "${text}" >| "${outFile}"
+	else
+		echo "${text}" > "${outFile}"
+	fi
+}
+_check_input
+_get_input
+_write_input "${force}" "${data}"
